@@ -7,9 +7,35 @@ import (
 	"os"
   "strconv"
   "strings"
+  "sync"
 )
 
+type Store struct {
+  data map[string]string
+  mu sync.RWMutex
+}
+
+func NewStore() *Store {
+  return &Store{
+    data: make(map[string]string),
+  }
+}
+
+func (s *Store) Set(key, value string) {
+  s.mu.Lock()
+  defer s.mu.Unlock()
+  s.data[key] = value
+}
+
+func (s *Store) Get(key string) (string, bool) {
+  s.mu.RLock()
+  defer s.mu.RUnlock()
+  value, exists := s.data[key]
+  return value, exists
+}
+
 func main() {
+  s := NewStore()
   l, err := net.Listen("tcp", "0.0.0.0:6379")
   if err != nil {
     fmt.Println("Failed to bind to port 6379")
@@ -24,11 +50,11 @@ func main() {
       os.Exit(1)
     }
 
-    go handleConnection(conn)
+    go handleConnection(conn, s)
   }
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, s *Store) {
   defer conn.Close()
   reader := bufio.NewReader(conn)
 
@@ -48,6 +74,14 @@ func handleConnection(conn net.Conn) {
         conn.Write([]byte("+PONG\r\n"))
       case "ECHO":
         conn.Write([]byte("+" + command[1] + "\r\n"))
+      case "SET":
+        key, value := command[1], command[2]
+        s.Set(key, value)
+        conn.Write([]byte("+OK\r\n"))
+      case "GET":
+        key := command[1]
+        value, _ := s.Get(key)
+        conn.Write([]byte("+" + value + "\r\n"))
       default:
         conn.Write([]byte("ERROR: unknown command\n"))
     }
