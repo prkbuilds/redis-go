@@ -8,30 +8,62 @@ import (
   "strconv"
   "strings"
   "sync"
+  "time"
 )
 
 type Store struct {
-  data map[string]string
-  mu sync.RWMutex
+  data      map[string]string
+  expiries  map[string]time.Time
+  mu        sync.RWMutex
 }
 
 func NewStore() *Store {
   return &Store{
     data: make(map[string]string),
+    expiries: make(map[string]time.Time),
   }
 }
 
-func (s *Store) Set(key, value string) {
+func (s *Store) Set(key, value string, expiry int) {
   s.mu.Lock()
   defer s.mu.Unlock()
   s.data[key] = value
+  if expiry > 0 {
+    s.expiries[key] = time.Now().Add(time.Duration(expiry) * time.Millisecond)
+    go s.expireKeyAfter(key, expiry)
+  }
 }
 
 func (s *Store) Get(key string) (string, bool) {
   s.mu.RLock()
   defer s.mu.RUnlock()
+
+  if expiry, exists := s.expiries[key]; exists {
+    if time.Now().After(expiry) {
+      delete(s.data, key)
+      delete(s.expiries, key)
+      return "", false
+    }
+  }
   value, exists := s.data[key]
   return value, exists
+}
+
+func (s *Store) expireKeyAfter(key string, expiry int) {
+  time.Sleep(time.Duration(expiry) * time.Millisecond)
+  s.mu.Lock()
+  defer s.mu.Unlock()
+  if expiration, exists := s.expiries[key]; exists && time.Now().After(expiration) {
+    delete(s.data, key)
+    delete(s.expiries, key)
+  }
+}
+
+func (s *Store) Del(key string) {
+  s.mu.RLock()
+  defer s.mu.RUnlock()
+  delete(s.data, key)
+  delete(s.expiries, key)
 }
 
 func main() {
@@ -76,12 +108,22 @@ func handleConnection(conn net.Conn, s *Store) {
         conn.Write([]byte("+" + command[1] + "\r\n"))
       case "SET":
         key, value := command[1], command[2]
-        s.Set(key, value)
+        var expiry int
+        if len(command) > 3 && strings.ToUpper(command[3]) == "PX" {
+          if exp, err := strconv.Atoi(command[4]); err == nil {
+            expiry = exp
+          }
+        }
+        s.Set(key, value, expiry)
         conn.Write([]byte("+OK\r\n"))
       case "GET":
         key := command[1]
-        value, _ := s.Get(key)
-        conn.Write([]byte("+" + value + "\r\n"))
+        value, exists := s.Get(key)
+        if !exists {
+          conn.Write([]byte("$-1\r\n"))
+        } else {
+          conn.Write([]byte("$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"))
+        }
       default:
         conn.Write([]byte("ERROR: unknown command\n"))
     }
@@ -89,46 +131,50 @@ func handleConnection(conn net.Conn, s *Store) {
 }
 
 func parseRESP(reader *bufio.Reader) ([]string, error) {
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, err
-	}
-	line = strings.TrimSpace(line)
+  line, err := reader.ReadString('\n')
+  if err != nil {
+    return nil, err
+  }
+  line = strings.TrimSpace(line)
 
-	if len(line) == 0 || line[0] != '*' {
-		return nil, fmt.Errorf("invalid RESP format")
-	}
+  if len(line) == 0 || line[0] != '*' {
+    return nil, fmt.Errorf("invalid RESP format: expected '*' at the start")
+  }
 
-	numElements, err := strconv.Atoi(line[1:])
-	if err != nil {
-		return nil, err
-	}
+  numElements, err := strconv.Atoi(line[1:])
+  if err != nil {
+    return nil, fmt.Errorf("invalid number of elements: %s", line[1:])
+  }
 
-	command := make([]string, 0, numElements)
-	for i := 0; i < numElements; i++ {
-		line, err := reader.ReadString('\n')
-		if err != nil || line[0] != '$' {
-			return nil, fmt.Errorf("invalid bulk string")
-		}
+  command := make([]string, 0, numElements)
 
-		strLen, err := strconv.Atoi(strings.TrimSpace(line[1:]))
-		if err != nil {
-			return nil, err
-		}
+  for i := 0; i < numElements; i++ {
+    line, err := reader.ReadString('\n')
+    if err != nil {
+      return nil, err
+    }
+    if line[0] != '$' {
+      return nil, fmt.Errorf("invalid bulk string header, expected '$'")
+    }
 
-		str := make([]byte, strLen)
-		_, err = reader.Read(str)
-		if err != nil {
-			return nil, err
-		}
+    strLen, err := strconv.Atoi(strings.TrimSpace(line[1:]))
+    if err != nil {
+      return nil, fmt.Errorf("invalid bulk string length: %s", line[1:])
+    }
 
-		_, err = reader.Discard(2)
-		if err != nil {
-			return nil, err
-		}
+    str := make([]byte, strLen)
+    _, err = reader.Read(str)
+    if err != nil {
+      return nil, err
+    }
 
-		command = append(command, string(str))
-	}
+    _, err = reader.Discard(2)
+    if err != nil {
+      return nil, err
+    }
 
-	return command, nil
+    command = append(command, string(str))
+  }
+
+  return command, nil
 }
