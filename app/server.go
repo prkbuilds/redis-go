@@ -50,14 +50,14 @@ func (s *Store) Get(key string) (string, bool) {
 }
 
 const (
-	opCodeModuleAux    byte = 247 /* Module auxiliary data. */
-	opCodeIdle         byte = 248 /* LRU idle time. */
-	opCodeFreq         byte = 249 /* LFU frequency. */
-	opCodeAux          byte = 250 /* RDB aux field. */
-	opCodeResizeDB     byte = 251 /* Hash table resize hint. */
-	opCodeExpireTimeMs byte = 252 /* Expire time in milliseconds. */
-	opCodeExpireTime   byte = 253 /* Old expire time in seconds. */
-	opCodeSelectDB     byte = 254 /* DB number of the following keys. */
+	opCodeModuleAux    byte = 247
+	opCodeIdle         byte = 248
+	opCodeFreq         byte = 249
+	opCodeAux          byte = 250
+	opCodeResizeDB     byte = 251
+	opCodeExpireTimeMs byte = 252
+	opCodeExpireTime   byte = 253
+	opCodeSelectDB     byte = 254
 	opCodeEOF          byte = 255
 )
 
@@ -75,11 +75,17 @@ func parseTable(bytes []byte) []byte {
 	end := sliceIndex(bytes, opCodeEOF)
 	return bytes[start+1 : end]
 }
-func readFile(path string) string {
-	c, _ := os.ReadFile(path)
-	key := parseTable(c)
-	str := key[4 : 4+key[3]]
-	return string(str)
+
+func readFile(path string, s *Store) {
+  content, _ := os.ReadFile(path)
+	if len(content) == 0 {
+		return
+	}
+	line := parseTable(content)
+	key := line[4 : 4+line[3]]
+	value := line[5+line[3]:]
+	
+  s.Set(string(key), string(value), 0)
 }
 
 func (s *Store) expireKeyAfter(key string, expiry int) {
@@ -134,6 +140,9 @@ func handleConnection(conn net.Conn, s *Store) {
         i++
     }
   }
+
+  readFile(dir + "/" + dbfilename, s)
+
   defer conn.Close()
   reader := bufio.NewReader(conn)
 
@@ -184,8 +193,12 @@ func handleConnection(conn net.Conn, s *Store) {
         }
       case "KEYS":
         if command[1] == "*" {
-          fileContent := readFile(dir + "/" + dbfilename)
-          conn.Write([]byte(ToRESP([]string{fileContent})))
+          content, _ := os.ReadFile(fmt.Sprintf("%s/%s", dir, dbfilename))
+          key := parseTable(content)
+          length := key[3]
+          str := key[4 : 4+length]
+          ans := string(str)
+          conn.Write([]byte(fmt.Sprintf("*1\r\n$%v\r\n%s\r\n", len(ans), ans)))
         }
       default:
         conn.Write([]byte("ERROR: unknown command\n"))
