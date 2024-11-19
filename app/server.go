@@ -87,6 +87,20 @@ func main() {
 }
 
 func handleConnection(conn net.Conn, s *Store) {
+  dir := ""
+  dbfilename := ""
+
+  args := os.Args
+  for i := 1; i < len(args); i++ {
+    switch args[i] {
+      case "--dir":
+        dir = args[i+1]
+        i++
+      case "--dbfilename":
+        dbfilename = args[i+1]
+        i++
+    }
+  }
   defer conn.Close()
   reader := bufio.NewReader(conn)
 
@@ -124,10 +138,52 @@ func handleConnection(conn net.Conn, s *Store) {
         } else {
           conn.Write([]byte("$" + strconv.Itoa(len(value)) + "\r\n" + value + "\r\n"))
         }
+      case "CONFIG":
+        if command[1] == "GET" {
+          switch command[2] {
+            case "dir":
+              conn.Write([]byte(ToRESP([]string{"dir", dir})))
+            case "dbfilename":
+              conn.Write([]byte(ToRESP(dbfilename)))
+            default:
+              conn.Write([]byte("$-1\r\n"))
+          }
+        }
       default:
         conn.Write([]byte("ERROR: unknown command\n"))
     }
   }
+}
+
+func ToRESP(output interface{}) string {
+	switch v := output.(type) {
+	case string:
+		// Simple string or bulk string
+		if strings.Contains(v, "\n") || strings.Contains(v, "\r") {
+			return fmt.Sprintf("$%d\r\n%s\r\n", len(v), v) // Bulk String
+		}
+		return fmt.Sprintf("+%s\r\n", v) // Simple String
+	case error:
+		// Error message
+		return fmt.Sprintf("-%s\r\n", v.Error())
+	case int, int64:
+		// Integer
+		return fmt.Sprintf(":%d\r\n", v)
+	case []string:
+		// Array of strings
+		var builder strings.Builder
+		builder.WriteString(fmt.Sprintf("*%d\r\n", len(v)))
+		for _, element := range v {
+			builder.WriteString(ToRESP(element))
+		}
+		return builder.String()
+	case nil:
+		// Null bulk string
+		return "$-1\r\n"
+	default:
+		// Unsupported type
+		return "-ERR unknown type\r\n"
+	}
 }
 
 func parseRESP(reader *bufio.Reader) ([]string, error) {
