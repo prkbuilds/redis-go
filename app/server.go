@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+  "os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -20,6 +21,7 @@ func NewServer(ctx context.Context, config *Store) *Server {
 }
 
 func (s *Server) Run() error {
+
 	// Listen on Context for SIGINT or SIGTERM to shutdown gracefully.
 	ctx, stop := signal.NotifyContext(s.Context, syscall.SIGINT, syscall.SIGTERM)
 	defer stop() // stop will trigger ctx.Done() signal
@@ -29,6 +31,14 @@ func (s *Server) Run() error {
 	// Start TCP listener.
 	host, _ := s.Config.Get(keyHost)
 	port, _ := s.Config.Get(keyPort)
+  args := os.Args
+  for i := 1; i < len(args); i++ {
+    switch args[i] {
+    case "--port":
+      port = args[i+1]
+      i++;
+    }
+  }
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
 	if err != nil {
 		return fmt.Errorf("failed to bind to port %s: %v", port, err)
