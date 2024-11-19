@@ -6,24 +6,29 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"time"
 )
 
 const (
-	opCodeAuxField   byte = 0xFA // key, value follow
-	opCodeSelectDB   byte = 0xFE // following byte is db number
-	opCodeResizeDB   byte = 0xFB // follwing are 2 length-encoded ints
 	opCodeTypeString byte = 0x00 // following byte(s) are length encoding
+	opCodeAuxField   byte = 0xFA // key, value follow
+	opCodeResizeDB   byte = 0xFB // follwing are 2 length-encoded ints
+	opCodeExpMilSec  byte = 0xFC // following 8 bytes are expration time (ms)
+	opCodeExpSec     byte = 0xFD // following 4 bytes are expration time (s)
+	opCodeSelectDB   byte = 0xFE // following byte is db number
 	opCodeEOF        byte = 0xFF // following 8 bytes are CRC64 checksum
 )
 
 type Store struct {
-	kvMap map[string]string
-	db    *os.File
+	kv     map[string]string
+	expiry map[string]time.Time
+	db     *os.File
 }
 
 func NewStore() *Store {
 	kv := make(map[string]string)
-	return &Store{kvMap: kv}
+	exp := make(map[string]time.Time)
+	return &Store{kv: kv, expiry: exp}
 }
 
 // Load loads the in-memory KV map with values from the db.
@@ -33,7 +38,7 @@ func (s *Store) Load(db *os.File) error {
 	}
 	defer db.Close()
 
-	data, err := parseRDB(db)
+	data, err := parseRDB(db, s.expiry)
 	if err != nil {
 		return err
 	}
@@ -58,13 +63,13 @@ func (s *Store) Save() error {
 func (s *Store) Get(key string) (string, error) {
 	if key == "*" {
 		keys := []string{}
-		for key := range s.kvMap {
+		for key := range s.kv {
 			keys = append(keys, key)
 		}
 		return encodeBulkStringArray(len(keys), keys...), nil
 	}
 
-	val, found := s.kvMap[key]
+	val, found := s.kv[key]
 	if !found {
 		return "", fmt.Errorf("key %q not found", key)
 	}
@@ -74,37 +79,38 @@ func (s *Store) Get(key string) (string, error) {
 // Add stores the KV-pair in the KV map. An error will be returned if the
 // key already exists.
 func (s *Store) Add(key, val string) error {
-	_, found := s.kvMap[key]
+	_, found := s.kv[key]
 	if found {
 		return fmt.Errorf("key %q already exists", key)
 	}
-	s.kvMap[key] = val
+	s.kv[key] = val
 	return nil
 }
 
 // Update replaces the value of an existing key to a new one. An error is
 // returned if the key is not found.
 func (s *Store) Update(key, val string) error {
-	_, found := s.kvMap[key]
+	_, found := s.kv[key]
 	if !found {
 		return fmt.Errorf("key %q not found", key)
 	}
-	s.kvMap[key] = val
+	s.kv[key] = val
 	return nil
 }
 
 // Delete removes the given key and its value from the KV map. An error
 // is returned if the key is not found.
 func (s *Store) Delete(key string) error {
-	_, found := s.kvMap[key]
+	_, found := s.kv[key]
 	if !found {
 		return fmt.Errorf("key %q not found", key)
 	}
-	delete(s.kvMap, key)
+	delete(s.kv, key)
 	return nil
 }
 
-func parseRDB(file *os.File) ([]string, error) {
+// parseRDB parses the values in the RDB file.
+func parseRDB(file *os.File, expiry map[string]time.Time) ([]string, error) {
 	reader := bufio.NewReader(file)
 	result := []string{}
 
@@ -124,6 +130,9 @@ func parseRDB(file *os.File) ([]string, error) {
 		return result, err
 	}
 
+	// Read in the rest of the data.
+	var expiration time.Time
+	var hasExpiration bool
 	for {
 		opcode, err := reader.ReadByte()
 		if err != nil {
@@ -155,6 +164,24 @@ func parseRDB(file *os.File) ([]string, error) {
 			fmt.Printf("AUX key-value pair: %s: %s", kv[0], kv[1])
 		case opCodeResizeDB:
 			// Implement
+		case opCodeExpSec:
+			data := make([]byte, 4)
+			if _, err = reader.Read(data); err != nil {
+				return result, err
+			}
+			timestamp := binary.LittleEndian.Uint32(data)
+			expiration = time.Unix(int64(timestamp), 0).UTC()
+			hasExpiration = true
+			fmt.Printf("Expiration %s", expiration.String())
+		case opCodeExpMilSec:
+			data := make([]byte, 8)
+			if _, err = reader.Read(data); err != nil {
+				return result, err
+			}
+			timestamp := binary.LittleEndian.Uint64(data)
+			expiration = time.UnixMilli(int64(timestamp)).UTC()
+			hasExpiration = true
+			fmt.Printf("Expiration %s", expiration.String())
 		case opCodeTypeString:
 			kv := [][]byte{}
 			for i := 0; i < 2; i++ {
@@ -168,8 +195,18 @@ func parseRDB(file *os.File) ([]string, error) {
 				}
 				kv = append(kv, data)
 			}
-			fmt.Printf("STRING key-value pair: %s: %s", kv[0], kv[1])
+
+			if hasExpiration {
+				hasExpiration = false
+				if expiration.Before(time.Now().UTC()) {
+					hasExpiration = false
+					break
+				}
+				expiry[string(kv[0])] = expiration
+			}
+
 			result = append(result, string(kv[0]), string(kv[1]))
+			fmt.Printf("STRING key-value pair: %s: %s", kv[0], kv[1])
 		case opCodeEOF:
 			// Get the 8-byte checksum after this
 			checksum := make([]byte, 8)

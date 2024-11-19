@@ -56,10 +56,10 @@ func (c *ClientHandler) Handle(wg *sync.WaitGroup) {
 	if c.Server.IsPersistent() {
 		file, err := c.dbFile()
 		if err != nil {
-			fmt.Printf("Error opening db file: %v", err)
+			fmt.Errorf("Error opening db file: %v", err)
 		}
 		if err := c.Store.Load(file); err != nil {
-			fmt.Printf("Error reading from db: %v", err)
+			fmt.Errorf("Error reading from db: %v", err)
 		}
 	} else {
 		fmt.Printf("Database file not provided, data will not be saved between sessions.")
@@ -101,7 +101,7 @@ func (c *ClientHandler) Handle(wg *sync.WaitGroup) {
 				// Execute command if the array is complete.
 				if cmdReceived == cmdLength {
 					if err := c.executeCommand(cmd); err != nil {
-						fmt.Printf("Error executing command %v: %v", cmd, err)
+						fmt.Errorf("Error executing command %v: %v", cmd, err)
 					}
 					// Reset for next command.
 					cmd = Command{}
@@ -166,12 +166,8 @@ func (c *ClientHandler) handleSet(args []string) error {
 		if err != nil {
 			return fmt.Errorf("error parsing expiration time: %v", err)
 		}
-		go func() {
-			time.Sleep(time.Duration(expiry) * time.Millisecond)
-			if err := c.Store.Delete(key); err != nil {
-				fmt.Printf(err.Error())
-			}
-		}()
+		duration := time.Duration(expiry) * time.Millisecond
+		c.Store.expiry[key] = time.Now().UTC().Add(duration)
 	}
 	return c.send(okResponse)
 }
@@ -185,9 +181,20 @@ func (c *ClientHandler) handleGet(args []string) error {
 	fmt.Printf("GET %s command received.", key)
 	val, err := c.Store.Get(key)
 	if err != nil {
-		fmt.Printf(err.Error())
+		fmt.Errorf(err.Error())
 		return c.send(nullResponse)
 	}
+
+	// Check if KV pair is expired. If so, delete and return null.
+	expiry, hasExpiration := c.Store.expiry[key]
+	if hasExpiration && expiry.Before(time.Now().UTC()) {
+		if err := c.Store.Delete(key); err != nil {
+			fmt.Errorf(err.Error())
+		}
+		delete(c.Store.expiry, key) // remove expiry record
+		return c.send(nullResponse)
+	}
+
 	return c.send(encodeSimpleString(val))
 }
 
@@ -206,7 +213,7 @@ func (c *ClientHandler) handleConfig(args []string) error {
 
 		val, err := c.Server.Config.Get(key)
 		if err != nil {
-			return err
+			return c.send(nullResponse)
 		}
 
 		return c.send(encodeBulkStringArray(2, key, val))
