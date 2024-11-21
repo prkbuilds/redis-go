@@ -129,6 +129,8 @@ func (c *ClientHandler) executeCommand(cmd Command) error {
 		return c.handleKeys(cmd.Args)
 	case "INFO":
 		return c.handleInfo(cmd.Args)
+  case "REPLCONF":
+    return c.send(okResponse)
 	default:
 		return fmt.Errorf("unrecognized command %q", cmd.Command)
 	}
