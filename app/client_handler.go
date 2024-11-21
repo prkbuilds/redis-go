@@ -264,7 +264,12 @@ func (c *ClientHandler) handleKeys(args []string) error {
 
 // handleInfo handles INFO commands.
 func (c *ClientHandler) handleInfo(args []string) error {
-  return c.send(encodeBulkString("role:master"))
+  info := "role:master"
+  role, _ := c.Server.Config.Get(replicaOf)
+  if role != "" {
+    info = "role:slave"
+  }
+  return c.send(encodeBulkString(info))
 }
 
 // send sends the message to the client.

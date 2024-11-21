@@ -9,6 +9,7 @@ import (
 const (
 	flagDBDir      = "--dir"        // command-line flag for db directory
 	flagDBFilename = "--dbfilename" // command-line flag for db filename
+	replicaOf      = "--replicaof"  // command-line flag for replica of
 	keyDBDir       = "dir"          // store key for db directory
 	keyDBFilename  = "dbfilename"   // store key for db filename
 	keyHost        = "host"         // store key for server host URL
@@ -38,7 +39,11 @@ func main() {
 			if err := cfg.Add(keyDBFilename, args[i+1]); err != nil {
 				fmt.Printf(err.Error())
 			}
-		}
+		} else if args[i] == replicaOf && len(args) >= i {
+      if err := cfg.Add(replicaOf, args[i+1]); err != nil {
+        fmt.Printf(err.Error())
+      }
+    }
 	}
 	fmt.Printf("Server config: %+v", cfg)
 
