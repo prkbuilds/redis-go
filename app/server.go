@@ -6,6 +6,7 @@ import (
 	"net"
   "os"
 	"os/signal"
+  "strings"
 	"sync"
 	"syscall"
 )
@@ -31,6 +32,17 @@ func (s *Server) Run() error {
 	// Start TCP listener.
 	host, _ := s.Config.Get(keyHost)
 	port, _ := s.Config.Get(keyPort)
+  master, _ := s.Config.Get(replicaOf)
+
+  if master != "" {
+    params := strings.Split(master, " ")
+    address := strings.Join(params, ":")
+    m, err := net.Dial("tcp", address)
+    if err != nil {
+      return fmt.Errorf("failed to connect to master: %v", err)
+    }
+    m.Write([]byte("*1\r\n$4\r\nPING\r\n"))
+  }
   args := os.Args
   for i := 1; i < len(args); i++ {
     switch args[i] {
