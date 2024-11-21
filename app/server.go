@@ -9,6 +9,7 @@ import (
   "strings"
 	"sync"
 	"syscall"
+  "time"
 )
 
 type Server struct {
@@ -42,6 +43,10 @@ func (s *Server) Run() error {
       return fmt.Errorf("failed to connect to master: %v", err)
     }
     m.Write([]byte("*1\r\n$4\r\nPING\r\n"))
+    time.Sleep(1 * time.Second)
+		m.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"))
+		time.Sleep(1 * time.Second)
+		m.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
   }
   args := os.Args
   for i := 1; i < len(args); i++ {
