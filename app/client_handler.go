@@ -127,6 +127,8 @@ func (c *ClientHandler) executeCommand(cmd Command) error {
 		return c.handleConfig(cmd.Args)
 	case "KEYS":
 		return c.handleKeys(cmd.Args)
+	case "INFO":
+		return c.handleInfo(cmd.Args)
 	default:
 		return fmt.Errorf("unrecognized command %q", cmd.Command)
 	}
@@ -258,6 +260,11 @@ func (c *ClientHandler) handleKeys(args []string) error {
 	fmt.Printf("KEYS %s command received.", key)
 
 	return c.send(result)
+}
+
+// handleInfo handles INFO commands.
+func (c *ClientHandler) handleInfo(args []string) error {
+  return c.send(encodeBulkString("role:master"))
 }
 
 // send sends the message to the client.
