@@ -131,6 +131,8 @@ func (c *ClientHandler) executeCommand(cmd Command) error {
 		return c.handleInfo(cmd.Args)
   case "REPLCONF":
     return c.send(okResponse)
+  case "PSYNC":
+    return c.send(encodeBulkString("FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0"))
 	default:
 		return fmt.Errorf("unrecognized command %q", cmd.Command)
 	}
