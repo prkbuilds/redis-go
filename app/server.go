@@ -13,8 +13,9 @@ import (
 )
 
 type Server struct {
-	Context context.Context
-	Config  *Store
+	Context   context.Context
+	Config    *Store
+  Replicas  []*ClientHandler
 }
 
 func NewServer(ctx context.Context, config *Store) *Server {

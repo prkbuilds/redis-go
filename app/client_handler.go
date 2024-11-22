@@ -123,6 +123,9 @@ func (c *ClientHandler) executeCommand(cmd Command) error {
 	case "ECHO":
 		return c.handleEcho(cmd.Args)
 	case "SET":
+    for _, r := range c.Server.Replicas {
+      r.send(encodeBulkStringArray(len(cmd.Args)+1, append([]string{cmd.Command}, cmd.Args...)...))
+    }
 		return c.handleSet(cmd.Args)
 	case "GET":
 		return c.handleGet(cmd.Args)
@@ -135,6 +138,7 @@ func (c *ClientHandler) executeCommand(cmd Command) error {
   case "REPLCONF":
     return c.send(okResponse)
   case "PSYNC":
+    c.Server.Replicas = append(c.Server.Replicas, c)
     c.send(encodeBulkString("FULLRESYNC 8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb 0"))
     return c.send(fmt.Sprintf("$%d\r\n%s", len(emptyRDB), emptyRDB))
 	default:
