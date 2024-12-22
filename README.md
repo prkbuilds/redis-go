@@ -1,4 +1,3 @@
-```markdown
 # Redis Server Implementation in Go
 
 This project is a lightweight implementation of a Redis-like in-memory data store, written in Go. It supports core Redis functionalities like key-value storage, replication, and basic client-server communication.
