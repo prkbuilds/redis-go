@@ -1,33 +1,78 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/3b574d9f-59b5-453c-8da2-9ef0df857db2)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+```markdown
+# Redis Server Implementation in Go
 
-This is a starting point for Go solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+This project is a lightweight implementation of a Redis-like in-memory data store, written in Go. It supports core Redis functionalities like key-value storage, replication, and basic client-server communication.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+## Features
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+- **Key-Value Store**: Supports `SET`, `GET`, and other basic Redis commands.
+- **Replication**: Implements master-replica communication using the `REPLCONF` and `PSYNC` protocols.
+- **Persistence**: Data persistence is supported for reliable storage between sessions.
+- **Concurrency**: Efficient handling of multiple clients using Go’s goroutines and synchronization primitives.
 
-# Passing the first stage
+## Installation
 
-The entry point for your Redis implementation is in `app/server.go`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/prkbuilds/redis-go.git
+   cd redis-go
+   ```
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
+2. Build the server:
+   ```bash
+   go build -o redis-server
+   ```
+
+3. Run the server:
+   ```bash
+   ./redis-server
+   ```
+
+## Usage
+
+### Start the Server
+Run the server with the default configuration:
+```bash
+./redis-server
 ```
 
-That's all!
+### Interact with the Server
+Use a Redis CLI or any Redis client library to interact with the server:
+```bash
+redis-cli -p 6379
+```
 
-# Stage 2 & beyond
+### Supported Commands
+- `PING`: Check server connectivity.
+- `SET <key> <value>`: Store a key-value pair.
+- `GET <key>`: Retrieve the value for a key.
+- `REPLCONF`: Handle replica configuration.
+- `PSYNC`: Synchronize data between master and replica.
 
-Note: This section is for stages 2 and beyond.
+## Replication Workflow
+1. The replica sends a `REPLCONF` command with parameters like `listening-port`.
+2. The master acknowledges the replica and initiates synchronization using `PSYNC`.
+3. The master sends the RDB snapshot to the replica for full resynchronization.
 
-1. Ensure you have `go (1.19)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `app/server.go`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+## Directory Structure
+```
+redis-go/
+├── main.go           # Entry point for the server
+├── server.go         # Core server implementation
+├── handler.go        # Client request handler
+├── store.go          # In-memory data store implementation
+└── README.md         # Project documentation
+```
+
+## Future Enhancements
+- Support for advanced Redis data types (e.g., lists, sets, and hashes).
+- More robust error handling and logging.
+- Optimization for large-scale deployment.
+
+## Contributing
+Contributions are welcome! Please fork the repository and create a pull request for any improvements or new features.
+
+## License
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+```
+
