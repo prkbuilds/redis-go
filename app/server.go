@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-  "os"
 	"os/signal"
   "strings"
 	"sync"
@@ -15,7 +14,42 @@ import (
 type Server struct {
 	Context   context.Context
 	Config    *Store
-  Replicas  []*ClientHandler
+  Replicas  []net.Conn
+  mu        sync.Mutex
+}
+
+func (s *Server) AddReplica(replica net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Replicas = append(s.Replicas, replica)
+}
+
+func (s *Server) RemoveReplica(replica net.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, r := range s.Replicas {
+		if r == replica {
+			s.Replicas = append(s.Replicas[:i], s.Replicas[i+1:]...)
+			break
+		}
+	}
+}
+
+func (s *Server) GetReplicas() []net.Conn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]net.Conn(nil), s.Replicas...) // Return a copy
+}
+
+func (s *Server) CloseReplicas() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, replica := range s.Replicas {
+    if replica != nil {
+  		replica.Close()
+    }
+	}
+	s.Replicas = nil
 }
 
 func NewServer(ctx context.Context, config *Store) *Server {
@@ -24,7 +58,6 @@ func NewServer(ctx context.Context, config *Store) *Server {
 }
 
 func (s *Server) Run() error {
-
 	// Listen on Context for SIGINT or SIGTERM to shutdown gracefully.
 	ctx, stop := signal.NotifyContext(s.Context, syscall.SIGINT, syscall.SIGTERM)
 	defer stop() // stop will trigger ctx.Done() signal
@@ -36,40 +69,44 @@ func (s *Server) Run() error {
 	port, _ := s.Config.Get(keyPort)
   master, _ := s.Config.Get(replicaOf)
 
-  if master != "" {
-    params := strings.Split(master, " ")
-    address := strings.Join(params, ":")
-    m, err := net.Dial("tcp", address)
-    if err != nil {
-      return fmt.Errorf("failed to connect to master: %v", err)
-    }
-    m.Write([]byte("*1\r\n$4\r\nPING\r\n"))
-    time.Sleep(1 * time.Second)
-		m.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n6380\r\n"))
-		time.Sleep(1 * time.Second)
-		m.Write([]byte("*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"))
-		time.Sleep(1 * time.Second)
-    m.Write([]byte("*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n"))
-  }
-  args := os.Args
-  for i := 1; i < len(args); i++ {
-    switch args[i] {
-    case "--port":
-      port = args[i+1]
-      i++;
-    }
-  }
+  fmt.Printf("Running server on %s:%s\n", host, port)
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
 	if err != nil {
 		return fmt.Errorf("failed to bind to port %s: %v", port, err)
 	}
 	fmt.Printf("Listening on port %s...", port)
 
+  var masterConn net.Conn
+  if master != "" {
+    params := strings.Split(master, " ")
+    address := strings.Join(params, ":")
+    conn, err := net.Dial("tcp", address)
+    if err != nil {
+      return fmt.Errorf("failed to connect to master: %v", err)
+    }
+    masterConn = conn
+
+    commands := []string{
+      "*1\r\n$4\r\nPING\r\n",
+      fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$%d\r\n%s\r\n", len(port), port),
+      "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n",
+      "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n",
+    }
+
+    for _, cmd := range commands {
+      if _, err := masterConn.Write([]byte(cmd)); err != nil {
+        return fmt.Errorf("failed to send command to master: %v", err)
+      }
+      time.Sleep(1 * time.Second)
+    }
+  }
+
 	// Start goroutine that stops listener when signal is received.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		<-ctx.Done()
+    s.CloseReplicas()
 		fmt.Printf("Closing listener...")
 		listener.Close()
 	}()

@@ -12,8 +12,8 @@ const (
 	replicaOf      = "--replicaof"  // command-line flag for replica of
 	keyDBDir       = "dir"          // store key for db directory
 	keyDBFilename  = "dbfilename"   // store key for db filename
-	keyHost        = "host"         // store key for server host URL
-	keyPort        = "port"         // store key for server port
+	keyHost        = "--host"         // store key for server host URL
+	keyPort        = "--port"         // store key for server port
 )
 
 func main() {
@@ -41,6 +41,10 @@ func main() {
 			}
 		} else if args[i] == replicaOf && len(args) >= i {
       if err := cfg.Add(replicaOf, args[i+1]); err != nil {
+        fmt.Printf(err.Error())
+      }
+    } else if args[i] == keyPort && len(args) >= i {
+      if err := cfg.Update(keyPort, args[i+1]); err != nil {
         fmt.Printf(err.Error())
       }
     }
